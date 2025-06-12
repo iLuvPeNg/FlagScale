@@ -1,0 +1,11 @@
+backends_commit:
+  Megatron-LM: baf94af3c667248865f23df73b9fb8e2395e6fd0
+backends_version:
+  Megatron-LM: 0.8.0
+commit: 64b4f41af25f2622b4c8a06aec3410ac9216b0e3
+contact: fanglai.peng@iluvatar.com
+device_type: BI_V150
+models:
+- llama3
+task:
+- train
