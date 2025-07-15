@@ -41,10 +41,11 @@ jobs:
           submodules: false
           set-safe-directory: true
 
-      - name: Coverage Online Report
-        run: |
-          REPORT_ADDR=$(cat "/workspace/config/report_address")
-          echo "After 'Run Unit Tests and Check Coverage' is completed/stopped, you can access the test diff-coverage report at the http://${REPORT_ADDR}/${{github.sha}}/cov-report-${{ inputs.backend }}/diff-cover-report-${{ inputs.backend }}.html"
+      # TODO: Re-enable when you have a public IP
+      # - name: Coverage Online Report
+      #   run: |
+      #     REPORT_ADDR=$(cat "/workspace/config/report_address")
+      #     echo "After 'Run Unit Tests and Check Coverage' is completed/stopped, you can access the test diff-coverage report at the http://${REPORT_ADDR}/${{github.sha}}/cov-report-${{ inputs.backend }}/diff-cover-report-${{ inputs.backend }}.html"
 
       - name: Run Unit Tests and Check Coverage
         run: |
@@ -52,9 +53,9 @@ jobs:
 
           git config --global --add safe.directory /__w/FlagScale/FlagScale
           if [ "${{ inputs.backend }}" = "megatron" ] || [ "${{ inputs.backend }}" = "flagscale" ]; then
-            python tools/patch/unpatch.py --backend Megatron-LM
+            PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=backend="Megatron-LM" --verbose --no-build-isolation
           elif [ "${{ inputs.backend }}" = "vllm" ]; then
-            python tools/patch/unpatch.py --backend vllm
+            PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=backend="vllm" --verbose --no-build-isolation
           else
             echo "Unknown backend type: ${{ inputs.backend }}"
             exit 1

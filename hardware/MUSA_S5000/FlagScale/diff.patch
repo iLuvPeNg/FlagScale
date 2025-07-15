@@ -1,12 +1,38 @@
+diff --git a/examples/deepseek_v3/conf/serve_auto_tuner.yaml b/examples/deepseek_v3/conf/serve_auto_tuner.yaml
+index d1568dc7..51487b95 100644
+--- a/examples/deepseek_v3/conf/serve_auto_tuner.yaml
++++ b/examples/deepseek_v3/conf/serve_auto_tuner.yaml
+@@ -7,13 +7,13 @@ experiment:
+   exp_dir: ./outputs/${experiment.exp_name}
+   task:
+     type: serve
++  deploy:
++    use_fs_serve: false
+   runner:
+     nnodes: 2
+     nproc_per_node: 8
+     hostfile: examples/deepseek/conf/hostfile.txt
+     docker: ds
+-    deploy:
+-      use_fs_serve: false
+   auto_tuner:
+     space:
+       tensor_model_parallel_size: [4, 8]
 diff --git a/examples/deepseek_v3/conf/train.yaml b/examples/deepseek_v3/conf/train.yaml
-index 86fa1e1d..bd6d5587 100644
+index e030db9e..bd6d5587 100644
 --- a/examples/deepseek_v3/conf/train.yaml
 +++ b/examples/deepseek_v3/conf/train.yaml
-@@ -8,23 +8,37 @@ experiment:
+@@ -4,27 +4,41 @@ defaults:
+   - train: 16b_a3b
+ 
+ experiment:
+-  exp_name: DeepSeek-16b-a3b
++  exp_name: DeepSeek-V3-Test
    seed: 42
    save_steps: 10000
-   load: None
--  exp_dir: /xxx
+-  load: null
+-  exp_dir: xxx
++  load: None
 +  exp_dir: ./output_openseek
    ckpt_format: torch
    task:
@@ -20,7 +46,7 @@ index 86fa1e1d..bd6d5587 100644
      rdzv_backend: static
 -    hostfile: null
 -  cmds:
--    before_start: "ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale"
+-    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
 +    hostfile: ./hostfile
 +    ssh_port: 62216
 +  # cmds:
@@ -47,38 +73,36 @@ index 86fa1e1d..bd6d5587 100644
  action: run
  
 diff --git a/examples/deepseek_v3/conf/train/16b_a3b.yaml b/examples/deepseek_v3/conf/train/16b_a3b.yaml
-index fe469de9..69d4ea18 100644
+index 532d9621..69d4ea18 100644
 --- a/examples/deepseek_v3/conf/train/16b_a3b.yaml
 +++ b/examples/deepseek_v3/conf/train/16b_a3b.yaml
-@@ -1,10 +1,10 @@
+@@ -1,15 +1,20 @@
  system:
    no_shared_fs: ${experiment.runner.no_shared_fs}
--  num_workers: 16
--  tensor_model_parallel_size: 2
+-  num_workers: 2
 +  num_workers: 8
-+  tensor_model_parallel_size: 1
+   tensor_model_parallel_size: 1
    pipeline_model_parallel_size: 2
 -  decoder_first_pipeline_num_layers: 13
--  expert_model_parallel_size: 2
+-  expert_model_parallel_size: 4
 +  decoder_first_pipeline_num_layers: 14
 +  expert_model_parallel_size: 8
    context_parallel_size: 1
-   disable_bias_linear: true
-   reset_position_ids: True
-@@ -12,9 +12,9 @@ system:
-   qk_layernorm: true
++  disable_bias_linear: true
++  reset_position_ids: True
++  reset_attention_mask: True
++  qk_layernorm: true
    sequence_parallel: true
    use_distributed_optimizer: true
 -  overlap_grad_reduce: true
 -  overlap_param_gather: true
--  finetune: false
 +  overlap_grad_reduce: false
 +  overlap_param_gather: false
 +  finetune: true
    precision:
      bf16: true
      attention_softmax_in_fp32: true
-@@ -22,8 +22,8 @@ system:
+@@ -17,8 +22,8 @@ system:
    logging:
      log_interval: 1
      tensorboard_log_interval: 1
@@ -89,7 +113,7 @@ index fe469de9..69d4ea18 100644
      log_timers_to_tensorboard: true
      log_validation_ppl_to_tensorboard: true
      log_throughput: true
-@@ -31,9 +31,10 @@ system:
+@@ -26,9 +31,10 @@ system:
      log_num_zeros_in_grad: true
      log_memory_to_tensorboard: true
    checkpoint:
@@ -103,22 +127,30 @@ index fe469de9..69d4ea18 100644
  
  model:
    transformer_impl: transformer_engine
-@@ -55,7 +56,9 @@ model:
+@@ -43,15 +49,16 @@ model:
+   rotary_base: 1000000
+   swiglu: true
+   normalization: RMSNorm
+-  qk_layernorm: true
+   init_method_std: 0.02
+   attention_dropout: 0.0
+   hidden_dropout: 0.0
++  clip_grad: 1.0
    position_embedding_type: rope
    untie_embeddings_and_output_weights: true
    no_position_embedding: true
 -  no_rope_fusion: true
+-  disable_bias_linear: true
 +  no_rope_fusion: false
 +  # fp8_format: hybrid
 +  # fp8_param_gather: true
  
    # mla args ==================
    multi_latent_attention: true
-@@ -82,19 +85,19 @@ model:
+@@ -78,40 +85,41 @@ model:
    moe_router_topk: 6
    moe_router_topk_scaling_factor: 2.446
    moe_token_dispatcher_type: "alltoall"
--  # moe_permute_fusion: true
 +  moe_permute_fusion: true
  
    # mtp args ====================
@@ -129,29 +161,34 @@ index fe469de9..69d4ea18 100644
  
    # training
    seed: ${experiment.seed}
-   # finetune: false
+-  finetune: false
++  # finetune: false
    micro_batch_size: 1
--  global_batch_size: 2048
+-  global_batch_size: 128 #2048
 +  global_batch_size: 256
    eval_iters: 0
--  train_samples: 244141056 #1T #29297664 #120B tokens
+-  train_iters: 102400
 +  train_samples: 768000 #1T #29297664 #120B tokens
  
    optimizer:
+-    clip_grad: 1.0
      weight_decay: 0.1
-@@ -103,18 +106,20 @@ model:
+     adam_beta1: 0.9
+     adam_beta2: 0.95
      lr_scheduler:
        lr: 3.0e-3
        min_lr: 3.0e-4
--      lr_warmup_samples: 2048000
+-      lr_warmup_fraction: 0.01
 +      lr_warmup_samples: 76800
        lr_decay_style: WSD
        lr_wsd_decay_style: cosine
--      lr_wsd_decay_samples: 2048
+-      lr_wsd_decay_iters: 10
 +      lr_wsd_decay_samples: 768
- 
++
  
  data:
+-  reset_position_ids: True
+-  reset_attention_mask: True
 -  data_path: /path
 +  data_path: /home/dist/projset_public/perf_logs/XLC_2025_openseek/dataset/cosmopedia-v2-full_text_document
 +  data_cache_path: /home/dist/project/mt_base/haoran/FlagScale/data
@@ -168,9 +205,31 @@ index fe469de9..69d4ea18 100644
 -    make_vocab_size_divisible_by: 64
 +    make_vocab_size_divisible_by: 64
 \ No newline at end of file
+diff --git a/examples/deepseek_v3/conf/train_hetero.yaml b/examples/deepseek_v3/conf/train_hetero.yaml
+index dc103b70..cbb1d2fa 100644
+--- a/examples/deepseek_v3/conf/train_hetero.yaml
++++ b/examples/deepseek_v3/conf/train_hetero.yaml
+@@ -7,7 +7,7 @@ experiment:
+   exp_name: DeepSeek-V3-Test
+   seed: 42
+   save_steps: 10000
+-  load: null
++  load: None
+   exp_dir: /xxx
+   ckpt_format: torch
+   task:
+@@ -20,7 +20,7 @@ experiment:
+     rdzv_backend: static
+     hostfile: null
+   cmds:
+-    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale
++    before_start: "ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale"
+   envs:
+     LOGLEVEL: "INFO"
+     CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
 diff --git a/examples/llama3/combine_log.py b/examples/llama3/combine_log.py
 new file mode 100644
-index 00000000..7b6b73eb
+index 00000000..52ca12b5
 --- /dev/null
 +++ b/examples/llama3/combine_log.py
 @@ -0,0 +1,131 @@
@@ -182,29 +241,29 @@ index 00000000..7b6b73eb
 +def find_latest_timestamp_directories(target_dir, pattern=None):
 +    """
 +    找出最晚和第二晚的时间戳目录
-+    
++
 +    参数:
 +    target_dir - 要搜索的目录路径
 +    pattern - 可选的时间戳正则表达式模式
-+    
++
 +    返回:
 +    (latest_dir, second_latest_dir) 元组
 +    """
 +    # 验证目录存在
 +    if not os.path.isdir(target_dir):
 +        raise ValueError(f"目录不存在: {target_dir}")
-+    
++
 +    # 获取所有子目录
-+    dirs = [d for d in os.listdir(target_dir) 
++    dirs = [d for d in os.listdir(target_dir)
 +            if os.path.isdir(os.path.join(target_dir, d))]
-+    
++
 +    # 如果没有目录，返回空
 +    if not dirs:
 +        return None, None
-+    
++
 +    # 尝试解析时间戳
 +    timestamp_dirs = []
-+    
++
 +    for d in dirs:
 +        try:
 +            # 尝试作为数字时间戳解析
@@ -218,7 +277,7 @@ index 00000000..7b6b73eb
 +                    match = re.match(pattern, d)
 +                    if not match:
 +                        continue
-+                    
++
 +                    # 尝试解析匹配的组
 +                    dt = datetime.strptime(match.group(), pattern)
 +                else:
@@ -230,7 +289,7 @@ index 00000000..7b6b73eb
 +                        "%Y%m%d",             # 20230115
 +                        "%Y-%m-%d"            # 2023-01-15
 +                    ]
-+                    
++
 +                    for fmt in formats:
 +                        try:
 +                            dt = datetime.strptime(d, fmt)
@@ -239,89 +298,85 @@ index 00000000..7b6b73eb
 +                            continue
 +                    else:
 +                        continue  # 所有格式都失败
-+                
++
 +                timestamp_dirs.append((d, dt.timestamp()))
 +            except Exception:
 +                continue  # 无法解析的时间戳格式
-+    
++
 +    # 按时间戳排序
 +    sorted_dirs = sorted(timestamp_dirs, key=lambda x: x[1], reverse=True)
-+    
++
 +    # 获取结果
 +    latest = sorted_dirs[0][0] if sorted_dirs else None
 +    second_latest = sorted_dirs[1][0] if len(sorted_dirs) > 1 else None
-+    
++
 +    return latest, second_latest
 +
 +def combine_log(bf16_log_path,fp8_log_path):
-+    
++
 +    p = bf16_log_path
 +    t = open(p,'r').readlines()
 +    t1 = t[:-2]
-+    
++
 +    p = fp8_log_path
 +    t = open(p,'r').readlines()
-+    
++
 +    i = 0
 +    for i,s in enumerate(t):
 +        if s.strip().startswith('[2025'):
 +            break
-+    
++
 +    t2 = t[i:]
 +    t = t1 + t2
 +    t = "".join(t)
-+    
++
 +    print(t)
-+    
++
 +    bak_path = fp8_log_path + '.bak'
 +    os.system(f'cp {fp8_log_path} {bak_path}')
-+    
++
 +    with open(fp8_log_path,'w') as f:
 +        f.write(t)
 +        f.close()
-+    
++
 +if __name__ == "__main__":
-+    
++
 +    hostfile_path = 'hostfile'
 +    target_ip = open(hostfile_path,'r').readlines()[-1].split(' ')[0].strip()
-+    
++
 +    target_directory = "outputs_llama3_70b/logs/details/host_3_{}".format(target_ip)  # 替换为你的目录路径
-+    
++
 +    # 可选：如果你的时间戳有特定格式，可以使用正则模式
 +    # timestamp_pattern = r"\d{8}_\d{6}"  # 示例：YYYYMMDD_HHMMSS
-+    
++
 +    latest_dir, second_latest_dir = find_latest_timestamp_directories(
 +        target_directory
 +        # pattern=timestamp_pattern  # 如果需要自定义格式
 +    )
-+    
++
 +    bf16_log_dir = os.path.join(target_directory,second_latest_dir)
 +    fp8_log_dir = os.path.join(target_directory,latest_dir)
-+    
++
 +    fp8_log_path = list(glob.glob(f"{fp8_log_dir}/*/*/7/stdout.log"))[0]
 +    bf16_log_path = list(glob.glob(f"{bf16_log_dir}/*/*/7/stdout.log"))[0]
-+    
++
 +    print(fp8_log_path,bf16_log_path)
-+    
-+    
++
++
 +    combine_log(bf16_log_path,fp8_log_path)
 \ No newline at end of file
 diff --git a/examples/llama3/conf/train.yaml b/examples/llama3/conf/train.yaml
-index 8b3acdfd..b9c14852 100644
+index 8b3acdfd..991cf532 100644
 --- a/examples/llama3/conf/train.yaml
 +++ b/examples/llama3/conf/train.yaml
-@@ -1,24 +1,43 @@
+@@ -1,5 +1,5 @@
  defaults:
 -  - train: 70b
 +  - train: 70b_finetune
    - _self_
  
  experiment:
-   exp_name: llama3
--  exp_dir: ./outputs_llama3_70b
-+  exp_dir: ./outputs_llama3_70b_2
-   task:
-     type: train
+@@ -10,15 +10,34 @@ experiment:
      backend: megatron
      entrypoint: ./flagscale/train/train_gpt.py
    runner:
@@ -348,9 +403,9 @@ index 8b3acdfd..b9c14852 100644
      CUDA_DEVICE_MAX_CONNECTIONS: 1
 -    NVTE_APPLY_QK_LAYER_SCALING: 0
 -    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
-+    MUSA_KERNEL_TIMEOUT: 3200000
++    MUSA_EXECUTION_TIMEOUT: 500000
 +    ACCELERATOR_BACKEND: musa
-+    MCCL_PROTOS: 1
++    MCCL_PROTOS: 2
 +    MCCL_CHECK_POINTERS: 0
 +    OMP_NUM_THREADS: 4
 +    MCCL_ALGOS: 1
@@ -358,8 +413,8 @@ index 8b3acdfd..b9c14852 100644
 +    MUSA_BLOCK_SCHEDULE_MODE: 1
 +    MCCL_IB_GID_INDEX: 3
 +    MCCL_NET_SHARED_BUFFERS: 0
-+    MUSA_USERQ: 1
-+  
++    GLOO_SOCKET_IFNAME: ens19f0np0
++
  action: run
  
  hydra:
@@ -457,7 +512,7 @@ index 8e4a06be..ad20e27d 100644
      vocab_size: 128256
 +    make_vocab_size_divisible_by: 64
 diff --git a/examples/llama3/conf/train/70b_finetune.yaml b/examples/llama3/conf/train/70b_finetune.yaml
-index aca7f56b..fe2c0d91 100644
+index aca7f56b..fe0e3b26 100644
 --- a/examples/llama3/conf/train/70b_finetune.yaml
 +++ b/examples/llama3/conf/train/70b_finetune.yaml
 @@ -1,6 +1,6 @@
@@ -495,12 +550,12 @@ index aca7f56b..fe2c0d91 100644
 +    # wandb_exp_name: "train-llama3-70B"
    checkpoint:
 -    load: ${ckpt_path:??}
-+    load: outputs_llama3_70b_2/checkpoints
++    load: outputs_llama3_70b/checkpoints
      ckpt_format: torch
 -    save_interval: 100
 -    finetune: True
-+    save_interval: 250
-+    finetune: false
++    save_interval: 50
++    finetune: False
  
  model:
    num_layers: 80
@@ -546,7 +601,7 @@ index aca7f56b..fe2c0d91 100644
      vocab_size: 128256
 diff --git a/examples/llama3/conf/train/70b_finetune_bf16.yaml b/examples/llama3/conf/train/70b_finetune_bf16.yaml
 new file mode 100644
-index 00000000..ccfa2523
+index 00000000..5555d161
 --- /dev/null
 +++ b/examples/llama3/conf/train/70b_finetune_bf16.yaml
 @@ -0,0 +1,95 @@
@@ -574,9 +629,9 @@ index 00000000..ccfa2523
 +  # disable-tp-comm-overlap-ag: True
 +  # disable-tp-comm-overlap-rs: True
 +
-+  recompute-granularity: full 
-+  recompute-method: block 
-+  recompute-num-layers: 2 
++  recompute-granularity: full
++  recompute-method: block
++  recompute-num-layers: 2
 +  precision:
 +    bf16: True
 +    attention_softmax_in_fp32: True
@@ -708,10 +763,10 @@ index 41e3c1d8..2fe322a8 100644
      make_vocab_size_divisible_by: 64
 diff --git a/examples/llama3/run_llama3_script.sh b/examples/llama3/run_llama3_script.sh
 new file mode 100644
-index 00000000..f270f18e
+index 00000000..d6156daf
 --- /dev/null
 +++ b/examples/llama3/run_llama3_script.sh
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,141 @@
 +#!/bin/bash
 +sed -i '/^[[:space:]]*-[[:space:]]*train:/s/70b_finetune/70b_finetune_bf16/' examples/llama3/conf/train.yaml
 +
@@ -723,7 +778,7 @@ index 00000000..f270f18e
 +wait_for_completion() {
 +    local timeout=17280000  # 48小时超时（秒）
 +    local start_time=$(date +%s)
-+    
++
 +    while true; do
 +        # 检查所有匹配的python进程
 +        count=$(pgrep -f "$TRAIN_PROCESS_PATTERN" | wc -l)
@@ -732,21 +787,75 @@ index 00000000..f270f18e
 +            echo "训练进程已结束"
 +            break
 +        fi
-+        
++
 +        # 检查超时
 +        local current_time=$(date +%s)
 +        if (( current_time - start_time > timeout )); then
 +            echo "错误：训练任务超时！"
 +            exit 1
 +        fi
-+        
++
 +        # 显示进度信息
 +        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 训练进行中..."
 +        sleep 60
 +    done
 +}
 +
++
 +wait_for_completion
++
++
++keep_earliest_and_latest_dirs() {
++    local target_dir="$1"
++    local safe_period_minutes="${2:-15}"  # 默认10分钟安全期
++
++    # 检查目录是否存在
++    if [ ! -d "$target_dir" ]; then
++        echo "Error: Directory '$target_dir' does not exist."
++        return 1
++    fi
++
++    # 获取当前时间戳
++    local current_timestamp=$(date +%s)
++
++    # 按创建时间排序所有子目录
++    local -a sorted_dirs
++    mapfile -t sorted_dirs < <(find "$target_dir" -mindepth 1 -maxdepth 1 -type d -printf "%T@ %p\n" | sort -n | cut -d' ' -f2-)
++
++    # 检查子目录数量
++    local count=${#sorted_dirs[@]}
++    if [ $count -lt 3 ]; then
++        #echo "No action needed. Found only $count subdirectories."
++        return 0
++    fi
++
++    # 确定要保留的目录（最早和最晚）
++    local earliest="${sorted_dirs[0]}"
++    local latest="${sorted_dirs[$((count-1))]}"
++
++    # 删除中间目录（仅当创建时间超过安全期）
++    local deleted_count=0
++    for dir in "${sorted_dirs[@]}"; do
++        if [[ "$dir" != "$earliest" && "$dir" != "$latest" ]]; then
++            # 获取目录创建时间
++            local dir_timestamp=$(stat -c %W "$dir" 2>/dev/null || stat -c %Y "$dir")
++            local age_minutes=$(( (current_timestamp - dir_timestamp) / 60 ))
++
++            # 检查目录是否超过安全期
++            if [ $age_minutes -ge $safe_period_minutes ]; then
++                echo "Deleting (safe): $dir (created ${age_minutes} minutes ago)"
++                rm -rf "$dir"
++                ((deleted_count++))
++            else
++                echo "Skipping (recent): $dir (created ${age_minutes} minutes ago)"
++            fi
++        fi
++    done
++
++    echo "Kept earliest: $earliest"
++    echo "Kept latest:   $latest"
++    echo "Deleted $deleted_count directories."
++}
 +
 +sed -i 's/\(train: *\)70b_finetune_bf16/\170b_finetune/' examples/llama3/conf/train.yaml
 +
@@ -754,10 +863,51 @@ index 00000000..f270f18e
 +
 +sleep 2m
 +
-+wait_for_completion
++run_command="python run.py --config-path ./examples/llama3/conf --config-name train action=run"
++stop_command="python run.py --config-path ./examples/llama3/conf --config-name train action=stop"
 +
-+python  ./examples/llama3/combine_log.py
-\ No newline at end of file
++#轮询训练进程是否存在，如果不存在，检查checkpoint.txt是否为500,如果不是就一直拉起
++status_file='outputs_llama3_70b/checkpoints/latest_checkpointed_iteration.txt'
++final_flag=500
++wait_for_completion_rerun() {
++    local timeout=17280000  # 48小时超时（秒）
++    local start_time=$(date +%s)
++
++    while true; do
++        # 检查所有匹配的python进程
++        count=$(pgrep -f "$TRAIN_PROCESS_PATTERN" | wc -l)
++        echo $count
++        if [ "$count" -eq 0 ]; then
++	    eval "$stop_command"
++            # 检查状态文件是否存在且包含500,即完成最终训练
++            if [ ! -f "$status_file" ] || ! grep -q "$final_flag" "$status_file"; then
++                echo "训练进程结束但未成功，重新启动训练..."
++		eval "$run_command"
++                sleep 60  # 等待进程启动
++                continue  # 重新开始循环检查进程状态
++            else
++                echo "训练进程已正常结束"
++                break
++            fi
++        fi
++
++        # 检查超时
++        local current_time=$(date +%s)
++        if (( current_time - start_time > timeout )); then
++            echo "错误：训练任务超时！"
++            exit 1
++        fi
++
++        # 显示进度信息
++        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 训练进行中..."
++        sleep 60
++	keep_earliest_and_latest_dirs outputs_llama3_70b/checkpoints
++    done
++}
++
++wait_for_completion_rerun
++
++#python  ./examples/llama3/combine_log.py
 diff --git a/examples/qwen2_5_vl/conf/train.yaml b/examples/qwen2_5_vl/conf/train.yaml
 index 7159e1b1..f94f657c 100644
 --- a/examples/qwen2_5_vl/conf/train.yaml
@@ -1212,8 +1362,20 @@ index 2a21fe14..5de99a6a 100644
  
  # reference from https://github.com/huggingface/transformers/blob/0ad3710d4767d4ac7ee95f33f8554373e59efade/src/transformers/models/qwen2_5_vl/modular_qwen2_5_vl.py#L243
  class Qwen2_5VisionModel(VisionModule):
+diff --git a/flagscale/train/theoretical_memory_usage.py b/flagscale/train/theoretical_memory_usage.py
+index e5da1d04..4f8b93cd 100644
+--- a/flagscale/train/theoretical_memory_usage.py
++++ b/flagscale/train/theoretical_memory_usage.py
+@@ -279,6 +279,7 @@ def compute_weight_and_optimizer_memory(args, verbose=False):
+     )
+ 
+     # Part3: MTP ============================================================================
++    args.mtp_num_layers = None
+     if args.mtp_num_layers is not None:
+         mtp_layer_is_moe = moe_layer_pattern[-1]
+         mtp_num_moe_layers = mtp_layer_is_moe * args.mtp_num_layers
 diff --git a/flagscale/train/train.py b/flagscale/train/train.py
-index bddcb2a5..9c931f85 100644
+index 7039c1a2..2099d91e 100644
 --- a/flagscale/train/train.py
 +++ b/flagscale/train/train.py
 @@ -11,7 +11,7 @@ import math
@@ -1287,7 +1449,72 @@ index bddcb2a5..9c931f85 100644
      if args.is_hybrid_model:
          # Calculate the number of each type of layer.
          num_attn_layers, num_mamba_layers, num_mlp_layers = calculate_layer_counts()
-@@ -1056,18 +1061,18 @@ def pretrain(
+@@ -484,12 +489,12 @@ def num_floating_point_operations_fs(args, batch_size):
+                 * args.hidden_size
+             )
+         else:
+-            # Group Query Attention.
+-            if not args.group_query_attention:
+-                args.num_query_groups = args.num_attention_heads
+             # Attention projection size.
+             query_projection_size = args.kv_channels * args.num_attention_heads
+             kv_projection_size = args.kv_channels * args.num_query_groups
++            # Group Query Attention.
++            if not args.group_query_attention:
++                args.num_query_groups = args.num_attention_heads
+             # qkv proj
+             num_flops_attn = (
+                 2
+@@ -513,11 +518,7 @@ def num_floating_point_operations_fs(args, batch_size):
+             )
+ 
+         # Part 2: MLP or MoE =====================================================================
+-        moe_ffn_hidden_size = (
+-            args.moe_ffn_hidden_size
+-            if args.moe_ffn_hidden_size is not None
+-            else args.ffn_hidden_size
+-        )
++        moe_ffn_hidden_size = args.moe_ffn_hidden_size if args.moe_ffn_hidden_size is not None else args.ffn_hidden_size
+         shared_expert_ffn_hidden_size = (
+             0
+             if args.moe_shared_expert_intermediate_size is None
+@@ -543,16 +544,11 @@ def num_floating_point_operations_fs(args, batch_size):
+                 moe_layer_pattern = args.moe_layer_freq
+             else:
+                 raise RuntimeError("Illegal --moe-layer-freq argument provided!")
+-            assert len(moe_layer_pattern) == args.num_layers, (
+-                f"Invalid length of moe_layer_pattern: {len(moe_layer_pattern)}, "
+-                f"expected {args.num_layers}, "
+-                f"current moe layer pattern: {args.moe_layer_freq}"
+-            )
++            assert len(moe_layer_pattern) == args.num_layers
+             num_moe_layers = sum(moe_layer_pattern)  # Number of 1s in `moe_layer_pattern`.
+             num_dense_layers = args.num_layers - num_moe_layers
+             num_experts_routed_to = args.moe_router_topk
+             num_experts = args.num_experts
+-            last_layer_is_moe = moe_layer_pattern[-1]
+ 
+         num_flops_dense_mlp = (
+             4 # mlp (two linear)
+@@ -593,16 +589,8 @@ def num_floating_point_operations_fs(args, batch_size):
+         )
+ 
+         # Part3: MTP =============================================================================
+-        if args.mtp_num_layers is not None:
+-            mtp_num_layers = args.mtp_num_layers
+-            num_moe_layers += last_layer_is_moe * mtp_num_layers
+-            num_dense_layers += (1 - last_layer_is_moe) * mtp_num_layers
+-            num_layers = args.num_layers + mtp_num_layers
+-        else:
+-            mtp_num_layers = 0
+-            num_layers = args.num_layers
+-
+         num_flops_mtp = 0
++        mtp_num_layers = 0 if not getattr(args, "mtp_num_layers", None) else args.mtp_num_layers
+         if mtp_num_layers > 0:
+             num_flops_mtp = (
+                 # MTP eh norm + final nrom
+@@ -1073,18 +1061,18 @@ def pretrain(
  
          print_datetime('after training is done')
  
@@ -1318,7 +1545,7 @@ index bddcb2a5..9c931f85 100644
  
          one_logger and one_logger.log_metrics(
              {'app_train_loop_finish_time': one_logger_utils.get_timestamp_in_ms()}
-@@ -1291,7 +1296,7 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
+@@ -1308,7 +1296,7 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
      #               from the current fp8 param) to its amax_history. The below function will correct
      #               the amax_history back.
      # After TE2.x: Below function is an empty function and does nothing.
@@ -1327,7 +1554,7 @@ index bddcb2a5..9c931f85 100644
  
      if wrap_with_ddp:
          if args.use_torch_fsdp2:
-@@ -1426,7 +1431,7 @@ def get_optimizer_param_scheduler(optimizer):
+@@ -1443,7 +1431,7 @@ def get_optimizer_param_scheduler(optimizer):
          override_opt_param_scheduler=args.override_opt_param_scheduler,
          wsd_decay_steps=wsd_decay_steps,
          lr_wsd_decay_style=args.lr_wsd_decay_style,
@@ -1336,7 +1563,7 @@ index bddcb2a5..9c931f85 100644
      )
  
      return opt_param_scheduler
-@@ -1583,18 +1588,18 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
+@@ -1600,18 +1588,18 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
      timers = get_timers()
  
      # CUDA Graph capturing only executes once, when it's the first training iteration.
@@ -1365,7 +1592,7 @@ index bddcb2a5..9c931f85 100644
      rerun_state_machine = get_rerun_state_machine()
      while rerun_state_machine.should_run_forward_backward(data_iterator):
          # Set grad to zero.
-@@ -1602,13 +1607,13 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
+@@ -1619,13 +1607,13 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
              model_chunk.zero_grad_buffer()
          optimizer.zero_grad()
  
@@ -1386,7 +1613,7 @@ index bddcb2a5..9c931f85 100644
  
          # Forward pass.
          forward_backward_func = get_forward_backward_func()
-@@ -1621,22 +1626,22 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
+@@ -1638,22 +1626,22 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
              micro_batch_size=args.micro_batch_size,
              decoder_seq_length=args.decoder_seq_length,
              forward_only=False,
@@ -1419,7 +1646,7 @@ index bddcb2a5..9c931f85 100644
      ########## FlagScale End ##########
  
      # Empty unused memory.
-@@ -1681,9 +1686,9 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
+@@ -1698,9 +1686,9 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
          torch.cuda.empty_cache()
  
      # Set the manual hooks when CUDA Graphs are enabled.
@@ -1432,7 +1659,7 @@ index bddcb2a5..9c931f85 100644
  
      if mpu.is_pipeline_last_stage(ignore_virtual=True):
          # Average loss across microbatches.
-@@ -1865,29 +1870,29 @@ def training_log(
+@@ -1882,29 +1870,29 @@ def training_log(
                  writer.add_scalar('params-norm vs samples', params_norm, args.consumed_train_samples)
              if wandb_writer:
                  wandb_writer.log({'params-norm': params_norm}, iteration)
@@ -1485,7 +1712,7 @@ index bddcb2a5..9c931f85 100644
  
      if args.num_experts is not None:
          moe_loss_scale = 1 / get_num_microbatches()
-@@ -1903,10 +1908,10 @@ def training_log(
+@@ -1920,10 +1908,10 @@ def training_log(
              wandb_writer=wandb_writer,
              total_loss_dict=total_loss_dict,
              per_layer_logging=args.moe_per_layer_logging,
@@ -1500,7 +1727,7 @@ index bddcb2a5..9c931f85 100644
          )
      if args.mtp_num_layers is not None:
          mtp_loss_scale = 1 / get_num_microbatches()
-@@ -1984,17 +1989,17 @@ def training_log(
+@@ -2001,19 +1989,17 @@ def training_log(
          total_loss_dict[skipped_iters_key] = 0
          total_loss_dict[nan_iters_key] = 0
          print_rank_last(log_string)
@@ -1513,6 +1740,8 @@ index bddcb2a5..9c931f85 100644
 -                report_memory(f'(after {iteration} iterations)')
 -                report_memory_flag = False
 -        else:
+-            num_microbatches = get_num_microbatches()
+-            fs_report_theoretical_memory(args, num_microbatches=num_microbatches, verbose=True)
 -            report_memory(f'(after {iteration} iterations)')
 -            report_memory_flag = False
 +        # if not args.auto_tune:
@@ -1529,7 +1758,7 @@ index bddcb2a5..9c931f85 100644
          timers.log(timers_to_log, normalizer=args.log_interval)
  
      return report_memory_flag
-@@ -2138,7 +2143,6 @@ def post_training_step_callbacks(
+@@ -2157,7 +2143,6 @@ def post_training_step_callbacks(
          check_adlr_autoresume_termination(iteration, model, optimizer, opt_param_scheduler)
  
      # Profiling.
@@ -1537,7 +1766,7 @@ index bddcb2a5..9c931f85 100644
      if (
          args.profile
          and iteration == args.profile_step_end
-@@ -2281,16 +2285,16 @@ def train(
+@@ -2300,16 +2285,16 @@ def train(
      timers = get_timers()
      one_logger = get_one_logger()
  
@@ -1563,7 +1792,7 @@ index bddcb2a5..9c931f85 100644
  
      # Write args to tensorboard
      write_args_to_tensorboard()
-@@ -2299,6 +2303,72 @@ def train(
+@@ -2318,6 +2303,72 @@ def train(
      for model_module in model:
          model_module.train()
  
@@ -1636,7 +1865,7 @@ index bddcb2a5..9c931f85 100644
      # Tracking loss.
      total_loss_dict = {}
  
-@@ -2453,30 +2523,108 @@ def train(
+@@ -2472,30 +2523,108 @@ def train(
          print_rank_0(f">>> Weight hashes match after {iteration} iterations...")
  
      # Run training iterations till done.
@@ -1768,7 +1997,7 @@ index bddcb2a5..9c931f85 100644
                  save_checkpoint_and_time(
                      iteration,
                      model,
-@@ -2486,228 +2634,101 @@ def train(
+@@ -2505,228 +2634,104 @@ def train(
                      checkpointing_context,
                      train_data_iterator=train_data_iterator,
                  )
@@ -1781,6 +2010,9 @@ index bddcb2a5..9c931f85 100644
 -            dummy_train_step(train_data_iterator)
 +            if should_exit:
 +                break
++
++            if iteration != 0:
++                time.sleep(10)
 +
 +            # Enable forward pre-hooks after first set of forward and backward passes.
 +            # When running in fp16, skip all NaN iterations until steady-state loss scaling value
@@ -2076,7 +2308,7 @@ index bddcb2a5..9c931f85 100644
                  one_logger_utils.track_e2e_metrics()
  
                  if args.manual_gc and args.manual_gc_eval:
-@@ -2717,31 +2738,88 @@ def train(
+@@ -2736,31 +2741,88 @@ def train(
                      enable_forward_pre_hook(model)
                      pre_hook_enabled = True
                  timers('interval-time', log_level=0).start(barrier=True)
@@ -2189,14 +2421,14 @@ index bddcb2a5..9c931f85 100644
      one_logger_utils.track_e2e_metrics()
  
 diff --git a/flagscale/train/train_gpt.py b/flagscale/train/train_gpt.py
-index c7b69cab..235447b0 100644
+index c7b69cab..308e698a 100644
 --- a/flagscale/train/train_gpt.py
 +++ b/flagscale/train/train_gpt.py
 @@ -6,6 +6,17 @@ from functools import partial
  from typing import List, Optional, Tuple, Union
  
  import torch
-+import os 
++import os
 +import sys
 +sys.path.append(os.path.dirname(
 +    os.path.dirname(os.path.abspath(__file__))))
